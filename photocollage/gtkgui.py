@@ -22,16 +22,18 @@ import os.path
 import random
 import sys
 import urllib
+import urllib.request
 
 import cairo
 import gi
+
+import re
 
 from photocollage import APP_NAME, artwork, collage, render
 from photocollage.render import PIL_SUPPORTED_EXTS as EXTS
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GObject, GdkPixbuf  # noqa: E402, I100
-
 
 gettext.textdomain(APP_NAME)
 _ = gettext.gettext
@@ -114,6 +116,23 @@ def gtk_run_in_main_thread(fn):
     def my_fn(*args, **kwargs):
         GObject.idle_add(fn, *args, **kwargs)
     return my_fn
+
+
+def download_file(url,parts):
+    # download it
+    req = urllib.request.Request(url, headers={"User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0"})
+    tmpname = os.path.join("/tmp",os.path.basename(parts.path))
+    try:
+        rp = urllib.request.urlopen(req)
+        # to a temp file
+        with open(tmpname, 'b+w') as lp:
+            lp.write(rp.read())
+        # then swap the remote name with the local temp in the list
+        return tmpname
+    except urllib.error.HTTPError as e:
+        print("Error downloading file.", e.msg)
+        return url
 
 
 class UserCollage:
@@ -299,12 +318,20 @@ class PhotoCollageWindow(Gtk.Window):
         if info == PhotoCollageWindow.TARGET_TYPE_TEXT:
             files = data.get_text().splitlines()
         elif info == PhotoCollageWindow.TARGET_TYPE_URI:
-            # Can only handle local URIs
-            files = [f for f in data.get_uris() if f.startswith("file://")]
+            files = data.get_uris()
 
+        # download it to tmp, then add it
+
+        # go through each file
         for i in range(len(files)):
-            if files[i].startswith("file://"):
-                files[i] = urllib.parse.unquote(files[i][7:])
+            parts = urllib.parse.urlparse(files[i])
+            # if it is non-local
+            if parts.scheme == "file":
+                print("File:",parts)
+                files[i] = parts.path
+            else:
+                print("URI:",parts)
+                files[i] = download_file(files[i],parts)
         self.update_photolist(files)
 
     def render_preview(self):
